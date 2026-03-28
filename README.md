@@ -95,7 +95,7 @@ python build_portable.py --ffmpeg-dir C:\path\to\ffmpeg\bin
 Notes:
 
 - The app already includes a Tkinter GUI; the portable build packages that GUI.
-- The generated app still needs Spotify credentials. Keep using a `.env` file or environment variables.
+- The generated app still needs Spotify credentials. Keep using a `.env` file or environment variables, or enter them later from the GUI using the `Credentials` button.
 - Packaged builds store their writable files in a normal user data folder instead of the app bundle itself.
 - If bundled `ffmpeg` is included, the packaged app will detect it automatically.
 - macOS builds should be created on macOS. For distribution outside your own machine, signing and notarization may still be required by Gatekeeper.

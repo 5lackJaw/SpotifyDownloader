@@ -42,6 +42,7 @@ SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
 ```
 
 The workflow writes that secret into a temporary `.env` file during the build.
+If you do not provide the secret, the app still builds and the user can enter credentials from the GUI after launch.
 
 ## Build result
 

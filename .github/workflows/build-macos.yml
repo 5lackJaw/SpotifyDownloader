@@ -37,8 +37,6 @@ jobs:
             echo ".env already present"
           elif [ -n "${{ secrets.SPOTIFY_ENV_FILE }}" ]; then
             printf "%s" "${{ secrets.SPOTIFY_ENV_FILE }}" > .env
-          elif [ -f .env.example ]; then
-            cp .env.example .env
           fi
 
       - name: Build app bundle

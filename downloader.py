@@ -24,7 +24,7 @@ import requests
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 import yt_dlp
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from mutagen.id3 import TALB, TIT2, TPE1, TPE2, TRCK, TDRC, TXXX
 from mutagen.wave import WAVE
 
@@ -66,12 +66,18 @@ def _default_runtime_root() -> Path:
     return _user_data_root() if getattr(sys, "frozen", False) else _launch_dir()
 
 
+def _runtime_env_path() -> Path:
+    root = _default_runtime_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return root / ".env"
+
+
 def _dotenv_candidates() -> list[Path]:
-    candidates = [
-        _launch_dir() / ".env",
-        _bundle_dir() / ".env",
-        Path.cwd() / ".env",
-    ]
+    candidates = [_runtime_env_path()]
+    if getattr(sys, "frozen", False):
+        candidates.extend([_launch_dir() / ".env", _bundle_dir() / ".env", Path.cwd() / ".env"])
+    else:
+        candidates.extend([_launch_dir() / ".env", Path.cwd() / ".env", _bundle_dir() / ".env"])
     seen: set[Path] = set()
     ordered: list[Path] = []
     for path in candidates:
@@ -92,6 +98,37 @@ def _load_project_env() -> None:
             load_dotenv(env_path, override=True)
             return
     load_dotenv(override=True)
+
+
+def _read_runtime_settings() -> dict[str, str]:
+    _load_project_env()
+    return {
+        "SPOTIFY_CLIENT_ID": (os.getenv("SPOTIFY_CLIENT_ID") or "").strip().strip('"').strip("'"),
+        "SPOTIFY_CLIENT_SECRET": (os.getenv("SPOTIFY_CLIENT_SECRET") or "").strip().strip('"').strip("'"),
+        "SPOTIFY_REDIRECT_URI": (
+            (os.getenv("SPOTIFY_REDIRECT_URI") or "http://127.0.0.1:8888/callback").strip().strip('"').strip("'")
+        ),
+        "FFMPEG_LOCATION": (os.getenv("FFMPEG_LOCATION") or "").strip().strip('"').strip("'"),
+    }
+
+
+def _write_runtime_settings(updates: dict[str, str]) -> Path:
+    env_path = _runtime_env_path()
+    existing = dotenv_values(env_path) if env_path.exists() else {}
+    data: dict[str, str] = {str(k): str(v) for k, v in existing.items() if k and v is not None}
+    for key, value in updates.items():
+        cleaned = str(value).strip()
+        if cleaned:
+            data[key] = cleaned
+        else:
+            data.pop(key, None)
+            os.environ.pop(key, None)
+
+    lines = [f"{key}={value}" for key, value in sorted(data.items())]
+    env_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    for key, value in data.items():
+        os.environ[key] = value
+    return env_path
 
 
 def _oauth_cache_path() -> Path:
@@ -1281,6 +1318,7 @@ def run_auth_diagnostics(
 
 
 def launch_gui() -> int:
+    _load_project_env()
     root = tk.Tk()
     root.title("Spotify Playlist Downloader")
     root.geometry("760x520")
@@ -1369,6 +1407,82 @@ def launch_gui() -> int:
         response_queue: "queue.Queue[str]" = queue.Queue(maxsize=1)
         enqueue("oauth_request", (auth_url, response_queue))
         return response_queue.get()
+
+    def open_settings_dialog() -> None:
+        if running["active"]:
+            messagebox.showinfo("Busy", "Wait for the current task to finish before editing settings.")
+            return
+
+        current = _read_runtime_settings()
+
+        dlg = tk.Toplevel(root)
+        dlg.title("Credentials and Settings")
+        dlg.transient(root)
+        dlg.grab_set()
+        dlg.resizable(False, False)
+
+        frame = ttk.Frame(dlg, padding=12)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(frame, text="Spotify Client ID").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        client_id_var = tk.StringVar(value=current["SPOTIFY_CLIENT_ID"])
+        ttk.Entry(frame, textvariable=client_id_var, width=54).grid(row=0, column=1, sticky="ew", pady=(0, 6))
+
+        ttk.Label(frame, text="Spotify Client Secret").grid(row=1, column=0, sticky="w", pady=(0, 6))
+        client_secret_var = tk.StringVar(value=current["SPOTIFY_CLIENT_SECRET"])
+        ttk.Entry(frame, textvariable=client_secret_var, width=54, show="*").grid(
+            row=1, column=1, sticky="ew", pady=(0, 6)
+        )
+
+        ttk.Label(frame, text="Spotify Redirect URI").grid(row=2, column=0, sticky="w", pady=(0, 6))
+        redirect_uri_var = tk.StringVar(value=current["SPOTIFY_REDIRECT_URI"])
+        ttk.Entry(frame, textvariable=redirect_uri_var, width=54).grid(row=2, column=1, sticky="ew", pady=(0, 6))
+
+        ttk.Label(frame, text="FFmpeg Location").grid(row=3, column=0, sticky="w", pady=(0, 6))
+        ffmpeg_var = tk.StringVar(value=current["FFMPEG_LOCATION"])
+        ttk.Entry(frame, textvariable=ffmpeg_var, width=54).grid(row=3, column=1, sticky="ew", pady=(0, 6))
+
+        def browse_ffmpeg() -> None:
+            selected = filedialog.askdirectory(initialdir=ffmpeg_var.get() or default_output)
+            if selected:
+                ffmpeg_var.set(selected)
+
+        ttk.Button(frame, text="Browse FFmpeg", command=browse_ffmpeg).grid(row=4, column=1, sticky="e", pady=(0, 8))
+        ttk.Label(frame, text=f"Saved to: {_runtime_env_path()}", justify="left", wraplength=500).grid(
+            row=5, column=0, columnspan=2, sticky="w", pady=(0, 10)
+        )
+
+        btns = ttk.Frame(frame)
+        btns.grid(row=6, column=0, columnspan=2, sticky="e")
+
+        def save_settings() -> None:
+            redirect_uri = redirect_uri_var.get().strip()
+            if redirect_uri and "localhost" in redirect_uri.lower():
+                messagebox.showerror(
+                    "Invalid redirect URI",
+                    "Use a loopback IP literal instead of localhost, for example http://127.0.0.1:8888/callback",
+                    parent=dlg,
+                )
+                return
+
+            env_path = _write_runtime_settings(
+                {
+                    "SPOTIFY_CLIENT_ID": client_id_var.get(),
+                    "SPOTIFY_CLIENT_SECRET": client_secret_var.get(),
+                    "SPOTIFY_REDIRECT_URI": redirect_uri,
+                    "FFMPEG_LOCATION": ffmpeg_var.get(),
+                }
+            )
+            _load_project_env()
+            append_log(f"[INFO] Saved settings to {env_path}")
+            status_var.set("Credentials/settings saved.")
+            dlg.destroy()
+
+        ttk.Button(btns, text="Cancel", width=10, command=dlg.destroy).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(btns, text="Save", width=10, command=save_settings).grid(row=0, column=1)
+
+        root.wait_window(dlg)
 
     def ask_abort_action() -> str:
         dlg = tk.Toplevel(root)
@@ -1483,6 +1597,7 @@ def launch_gui() -> int:
         repair_preview_btn.configure(state="disabled")
         repair_apply_btn.configure(state="disabled")
         diag_btn.configure(state="disabled")
+        settings_btn.configure(state="disabled")
         status_var.set("Starting...")
         progress_var.set(0.0)
         t = threading.Thread(target=worker, daemon=True)
@@ -1510,6 +1625,7 @@ def launch_gui() -> int:
         repair_preview_btn.configure(state="disabled")
         repair_apply_btn.configure(state="disabled")
         diag_btn.configure(state="disabled")
+        settings_btn.configure(state="disabled")
         status_var.set("Repair running...")
         t = threading.Thread(target=run_repair, args=(dry_run,), daemon=True)
         t.start()
@@ -1525,6 +1641,7 @@ def launch_gui() -> int:
         repair_preview_btn.configure(state="disabled")
         repair_apply_btn.configure(state="disabled")
         diag_btn.configure(state="disabled")
+        settings_btn.configure(state="disabled")
         status_var.set("Diagnostics running...")
         t = threading.Thread(target=run_diagnostics, daemon=True)
         t.start()
@@ -1532,6 +1649,8 @@ def launch_gui() -> int:
     start_btn = ttk.Button(action_bar, text="Start Download", command=start_download)
     start_btn.configure(width=18)
     start_btn.grid(in_=action_bar, row=0, column=1, sticky="e")
+    settings_btn = ttk.Button(action_bar, text="Credentials", command=open_settings_dialog, width=13)
+    settings_btn.grid(row=0, column=0, sticky="w")
     repair_preview_btn = ttk.Button(util_bar, text="Repair Dry Run", command=lambda: start_repair(True), width=13)
     repair_preview_btn.grid(row=0, column=0, sticky="w", padx=(0, 6))
     repair_apply_btn = ttk.Button(util_bar, text="Repair Apply", command=lambda: start_repair(False), width=13)
@@ -1562,6 +1681,7 @@ def launch_gui() -> int:
                 repair_preview_btn.configure(state="normal")
                 repair_apply_btn.configure(state="normal")
                 diag_btn.configure(state="normal")
+                settings_btn.configure(state="normal")
                 if code == 0:
                     status_var.set("Completed successfully.")
                 elif code == 3:
@@ -1577,6 +1697,7 @@ def launch_gui() -> int:
                 repair_preview_btn.configure(state="normal")
                 repair_apply_btn.configure(state="normal")
                 diag_btn.configure(state="normal")
+                settings_btn.configure(state="normal")
                 if code == 0:
                     status_var.set("Repair completed.")
                 else:
@@ -1588,6 +1709,7 @@ def launch_gui() -> int:
                 repair_preview_btn.configure(state="normal")
                 repair_apply_btn.configure(state="normal")
                 diag_btn.configure(state="normal")
+                settings_btn.configure(state="normal")
                 if code == 0:
                     status_var.set("Diagnostics passed.")
                 else:
