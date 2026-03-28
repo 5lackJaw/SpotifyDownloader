@@ -46,11 +46,21 @@ jobs:
           chmod +x build_macos.sh macos_sign_and_zip.sh
           FFMPEG_DIR="$(dirname "$(command -v ffmpeg)")" ./build_macos.sh
 
+      - name: Package app bundle
+        run: |
+          ditto -c -k --keepParent "dist/SpotifyDownloader.app" "dist/SpotifyDownloader-macOS.zip"
+
       - name: Upload app artifact
         uses: actions/upload-artifact@v4
         with:
           name: SpotifyDownloader-macOS-app
           path: dist/SpotifyDownloader.app
+
+      - name: Upload zipped app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyDownloader-macOS-zip
+          path: dist/SpotifyDownloader-macOS.zip
 
       - name: Upload build logs
         if: always()
