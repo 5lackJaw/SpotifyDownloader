@@ -1,0 +1,62 @@
+name: Build macOS App
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - ".github/workflows/build-macos.yml"
+      - "build_macos.sh"
+      - "build_portable.py"
+      - "downloader.py"
+      - "repair_library.py"
+      - "requirements.txt"
+      - "requirements-build.txt"
+      - ".env.example"
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+
+      - name: Prepare environment file
+        run: |
+          if [ -f .env ]; then
+            echo ".env already present"
+          elif [ -n "${{ secrets.SPOTIFY_ENV_FILE }}" ]; then
+            printf "%s" "${{ secrets.SPOTIFY_ENV_FILE }}" > .env
+          elif [ -f .env.example ]; then
+            cp .env.example .env
+          fi
+
+      - name: Build app bundle
+        run: |
+          chmod +x build_macos.sh macos_sign_and_zip.sh
+          FFMPEG_DIR="$(dirname "$(command -v ffmpeg)")" ./build_macos.sh
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyDownloader-macOS-app
+          path: dist/SpotifyDownloader.app
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyDownloader-macOS-build-files
+          path: |
+            build
+            dist

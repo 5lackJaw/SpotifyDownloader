@@ -1,0 +1,31 @@
+# Secrets and local config
+.env
+.spotify_oauth_cache
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+.build-venv/
+.mac-build-venv/
+
+# Build outputs
+build/
+dist/
+*.spec
+
+# Local runtime/output data
+downloads/
+.cache
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Convenience handoff copy; source files remain at repo root
+mac-build-handoff/
